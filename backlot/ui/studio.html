@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backlot — Studio</title>
+<link rel="stylesheet" href="/ui/board.css">
+<link rel="stylesheet" href="/ui/studio.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="slate">
+    <div class="clapper"></div>
+    <div>
+      <span class="wordmark">Backlot</span>
+      <h1>Studio</h1>
+    </div>
+    <span class="chip" id="modeChip">interactive</span>
+    <div class="spacer"></div>
+    <a class="nav-link" href="/">◂ Library</a>
+    <span class="live idle" id="liveBadge"><span class="dot"></span><span id="liveText">READY</span></span>
+  </header>
+
+  <div class="studio-grid">
+    <div class="builder" id="builder"><!-- panels injected --></div>
+    <div class="caps-rail">
+      <div class="panel">
+        <div class="phead"><span class="num">◆</span><h2>Your Capabilities</h2></div>
+        <div id="caps"><p class="empty-note">Discovering providers…</p></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module" src="/ui/studio.js"></script>
+</body>
+</html>

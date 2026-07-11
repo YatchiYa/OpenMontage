@@ -5,6 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backlot — Library</title>
 <link rel="stylesheet" href="/ui/board.css">
+<style>
+  .nav-link {
+    font-family: var(--mono); font-size: calc(10.5px * var(--fs-scale)); letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-2); text-decoration: none;
+    padding: 6px 12px; border: 1px solid var(--border); border-radius: 99px;
+    transition: all .14s ease;
+  }
+  .nav-link:hover { color: var(--amber); border-color: rgba(240,168,60,.42); }
+  .quickstart { margin: 22px 0 6px; }
+  .qs-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+  .qs-head .t { font-family: var(--mono); font-size: calc(11px * var(--fs-scale)); letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
+  .qs-head a { font-family: var(--mono); font-size: calc(10.5px * var(--fs-scale)); color: var(--text-2); text-decoration: none; margin-left: auto; }
+  .qs-head a:hover { color: var(--amber); }
+  .qs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .qs-card { display: block; text-decoration: none; padding: 16px 16px 17px; border: 1px solid var(--border);
+    border-radius: 13px; background: var(--surface); transition: all .15s ease; }
+  .qs-card:hover { border-color: rgba(240,168,60,.5); transform: translateY(-2px); }
+  .qs-card .ic { font-size: calc(18px * var(--fs-scale)); color: var(--amber); }
+  .qs-card .nm { font-family: var(--mono); font-size: calc(12px * var(--fs-scale)); letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text); font-weight: 600; margin: 8px 0 4px; }
+  .qs-card .ds { font-size: calc(11.5px * var(--fs-scale)); color: var(--text-2); line-height: 1.45; }
+</style>
 </head>
 <body>
 <div class="wrap">
@@ -16,8 +38,37 @@
     </div>
     <span class="chip" id="count"></span>
     <div class="spacer"></div>
+    <a class="nav-link" href="/studio">✦ Studio</a>
     <span class="live idle" id="liveBadge"><span class="dot"></span><span id="liveText">IDLE</span></span>
   </header>
+  <section class="quickstart">
+    <div class="qs-head">
+      <span class="t">Start a video</span>
+      <a href="/guide">📖 Read the guide ▸</a>
+    </div>
+    <div class="qs-grid">
+      <a class="qs-card" href="/ugc">
+        <div class="ic">◉</div>
+        <div class="nm">UGC Ad</div>
+        <div class="ds">Creator talks to camera about your product — mixed with real shots &amp; b-roll.</div>
+      </a>
+      <a class="qs-card" href="/reels">
+        <div class="ic">✦</div>
+        <div class="nm">Viral Reel</div>
+        <div class="ds">Fast, punchy short for TikTok / Reels / FB. Built to stop the scroll on mute.</div>
+      </a>
+      <a class="qs-card" href="/promo">
+        <div class="ic">◆</div>
+        <div class="nm">Product Promo</div>
+        <div class="ds">Polished promo from your product images — clean motion, voiceover, music.</div>
+      </a>
+      <a class="qs-card" href="/studio">
+        <div class="ic">＋</div>
+        <div class="nm">Blank Studio</div>
+        <div class="ds">Start from scratch with full control over every segment and feature.</div>
+      </a>
+    </div>
+  </section>
   <div class="lib-grid" id="grid"></div>
   <p class="hint" id="empty" style="display:none">No projects yet — run a production and it will appear here.</p>
 </div>

@@ -14,10 +14,11 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backlot.state import PROJECTS_DIR, REPO_ROOT, list_projects, load_board_state, summarize_project
+from backlot import studio
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 THUMB_CACHE_DIR = REPO_ROOT / ".backlot" / "thumbs"
@@ -269,6 +270,74 @@ def create_app() -> FastAPI:
         if not target.is_file():
             raise HTTPException(status_code=404, detail="media not found")
         return FileResponse(target)
+
+    # ---- Studio (interactive generation) ------------------------------
+
+    @app.get("/api/studio/capabilities")
+    async def studio_caps(force: bool = False) -> dict:
+        return await asyncio.to_thread(studio.discover_capabilities, force)
+
+    @app.post("/api/studio/session")
+    async def studio_session() -> dict:
+        return {"session": await asyncio.to_thread(studio.new_session)}
+
+    @app.post("/api/studio/upload")
+    async def studio_upload(request: Request, session: str, name: str) -> dict:
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty upload")
+        if len(data) > 400 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="file too large (400MB max)")
+        return await asyncio.to_thread(studio.save_upload, session, name, data)
+
+    @app.post("/api/studio/generate")
+    async def studio_generate(request: Request) -> dict:
+        spec = await request.json()
+        if not isinstance(spec, dict):
+            raise HTTPException(status_code=400, detail="invalid spec")
+        return await asyncio.to_thread(studio.start_job, spec)
+
+    @app.get("/api/studio/job/{job_id}")
+    async def studio_job(job_id: str) -> dict:
+        job = studio.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="unknown job")
+        return job
+
+    @app.get("/api/studio/preview")
+    async def studio_preview(session: str, name: str) -> FileResponse:
+        p = studio.upload_path(session, name)
+        if p is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return FileResponse(p)
+
+    @app.get("/studio")
+    async def studio_page() -> HTMLResponse:
+        return _ui_html("studio.html", ("board.css", "studio.css", "studio.js"))
+
+    # Friendly use-case entry points → Studio preloaded with a recipe.
+    @app.get("/ugc")
+    async def uc_ugc() -> RedirectResponse:
+        return RedirectResponse(url="/studio?case=ugc")
+
+    @app.get("/reels")
+    async def uc_reels() -> RedirectResponse:
+        return RedirectResponse(url="/studio?case=reels")
+
+    @app.get("/promo")
+    async def uc_promo() -> RedirectResponse:
+        return RedirectResponse(url="/studio?case=promo")
+
+    @app.get("/api/guide")
+    async def guide_md() -> PlainTextResponse:
+        guide = REPO_ROOT / "docs" / "STUDIO_GUIDE.md"
+        if not guide.is_file():
+            raise HTTPException(status_code=404, detail="guide not found")
+        return PlainTextResponse(guide.read_text(encoding="utf-8"), media_type="text/markdown")
+
+    @app.get("/guide")
+    async def guide_page() -> HTMLResponse:
+        return _ui_html("guide.html", ("board.css", "guide.css", "guide.js"))
 
     # ---- UI ------------------------------------------------------------
 
