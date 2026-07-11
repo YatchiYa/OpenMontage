@@ -123,13 +123,22 @@ export function resolveTheme(props: Record<string, unknown>): ThemeConfig {
 const calculateMetadata: CalculateMetadataFunction<ExplainerProps> = async ({
   props,
 }) => {
+  // Optional per-render dimension override (e.g. 1080x1920 vertical social).
+  // Falls back to the composition's declared 1920x1080 when absent.
+  const dims: { width?: number; height?: number } = {};
+  const w = (props as Record<string, unknown>).width;
+  const h = (props as Record<string, unknown>).height;
+  if (typeof w === "number" && typeof h === "number" && w > 0 && h > 0) {
+    dims.width = Math.round(w);
+    dims.height = Math.round(h);
+  }
   const cuts = props.cuts || [];
   if (cuts.length === 0) {
-    return { durationInFrames: 30 * 60 };
+    return { durationInFrames: 30 * 60, ...dims };
   }
   const lastEnd = Math.max(...cuts.map((c) => c.out_seconds || 0));
   // Add 1 second padding for final fade
-  return { durationInFrames: Math.ceil((lastEnd + 1) * 30) };
+  return { durationInFrames: Math.ceil((lastEnd + 1) * 30), ...dims };
 };
 
 export const Root: React.FC = () => {
