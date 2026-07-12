@@ -115,7 +115,15 @@ function field(labelText, control, hint) {
   return el("label", { class: "fld" },
     el("span", { class: "lab" }, labelText),
     control,
-    hint ? el("span", { class: "phead sub", style: "margin-top:4px;display:block" }, hint) : null);
+    hint ? el("span", { class: "help" }, hint) : null);
+}
+// Small explanatory line (not tied to a single input).
+function note(text) { return el("p", { class: "panel-note" }, text); }
+// A legend that explains each option of a chip/select control.
+function legend(pairs) {
+  const w = el("div", { class: "legend" });
+  for (const [k, v] of pairs) w.append(el("span", { class: "leg" }, el("b", {}, k), " " + v));
+  return w;
 }
 function select(options, value, onChange) {
   const s = el("select", { onchange: (e) => onChange(e.target.value) });
@@ -177,45 +185,61 @@ function moveSeg(i, d) {
 }
 function removeSeg(i) { state.segments.splice(i, 1); renderBuilder(); }
 
+const SEG_DESC = {
+  media: "Use a file you uploaded — an image (gets motion) or a video clip (plays as-is).",
+  ai_image: "Generate a still image from a text prompt. Uses an image provider (you have Google Imagen).",
+  ai_video: "Generate a moving clip from a text prompt. Uses a video provider (you have Gemini/Veo). Add a product image to place your product in the shot.",
+  avatar: "A talking creator/avatar speaks your script — the heart of UGC. Needs HeyGen (add HEYGEN_API_KEY).",
+};
+
 function segCard(seg, i) {
   const head = el("div", { class: "schead" },
     el("span", { class: `seg-badge ${seg.type}` }, seg.type.replace("_", " ")),
     el("span", { class: "idx" }, `#${i + 1}`),
     el("div", { class: "spacer" }),
-    el("button", { class: "icon-btn", title: "Move up", onclick: () => moveSeg(i, -1) }, "↑"),
-    el("button", { class: "icon-btn", title: "Move down", onclick: () => moveSeg(i, 1) }, "↓"),
-    el("button", { class: "icon-btn danger", title: "Remove", onclick: () => removeSeg(i) }, "✕"),
+    el("button", { class: "icon-btn", title: "Move earlier", onclick: () => moveSeg(i, -1) }, "↑"),
+    el("button", { class: "icon-btn", title: "Move later", onclick: () => moveSeg(i, 1) }, "↓"),
+    el("button", { class: "icon-btn danger", title: "Remove segment", onclick: () => removeSeg(i) }, "✕"),
   );
 
   const body = el("div", {});
+  body.append(el("p", { class: "seg-desc" }, SEG_DESC[seg.type] || ""));
+
   if (seg.type === "media") {
-    body.append(field("Source file", select(mediaOptions(["image", "video"]), seg.file,
-      (v) => { seg.file = v; })));
+    body.append(field("Source file", select(mediaOptions(["image", "video"]), seg.file, (v) => { seg.file = v; }),
+      "Pick a file from your Media (step 2). If left empty this segment is skipped."));
   }
   if (seg.type === "ai_image") {
-    body.append(field("Image prompt", textareaFor(seg, "prompt", "A cinematic close-up of the product on a marble table, soft light…")));
+    body.append(field("Image prompt", textareaFor(seg, "prompt", "A cinematic close-up of the product on a marble table, soft window light, shallow depth of field…"),
+      "Describe exactly what to show: subject, setting, lighting, and style. Specific beats vague."));
   }
   if (seg.type === "ai_video") {
-    body.append(field("Video prompt", textareaFor(seg, "prompt", "Handheld UGC clip: a creator holds the product, smiling, talking to camera…")));
+    body.append(field("Video prompt", textareaFor(seg, "prompt", "Handheld UGC clip: a creator holds the product, smiling, talking to camera, natural light…"),
+      "Describe the shot AND the motion: who/what, the action, camera movement, mood."));
     body.append(field("Product / reference image (optional)", select(mediaOptions(["image"]), seg.image, (v) => { seg.image = v; }),
-      "Used as the first frame / product placement reference."));
+      "Optional. Used as the first frame / reference so your real product appears in the generated clip."));
   }
   if (seg.type === "avatar") {
-    body.append(field("Avatar script (what they say)", textareaFor(seg, "script", "Okay so I've been using this for a week and honestly…")));
+    body.append(field("Avatar script (what they say)", textareaFor(seg, "script", "Okay so I've been using this for a week and honestly…"),
+      "Exactly the words the avatar speaks. Keep it natural and conversational — like a real creator."));
     body.append(el("div", { class: "row" },
-      field("Voice id (optional)", inputFor(seg, "voice_id", "elevenlabs / heygen voice id")),
-      field("Product image (optional)", select(mediaOptions(["image"]), seg.image, (v) => { seg.image = v; })),
+      field("Voice id (optional)", inputFor(seg, "voice_id", "ElevenLabs / HeyGen voice id"),
+        "A specific voice. Leave blank for the provider default."),
+      field("Product image (optional)", select(mediaOptions(["image"]), seg.image, (v) => { seg.image = v; }),
+        "Optional product reference for the shot."),
     ));
   }
 
-  // shared: motion (image only), caption, duration
   const shared = el("div", { class: "row" });
   if (seg.type === "media" || seg.type === "ai_image") {
-    shared.append(field("Motion", select(MOTIONS, seg.motion || state.motion, (v) => { seg.motion = v; })));
+    shared.append(field("Motion", select(MOTIONS, seg.motion || state.motion, (v) => { seg.motion = v; }),
+      "How this still moves (ken-burns = slow zoom, parallax = float, static = none)."));
   }
-  shared.append(field("Duration (s)", numberFor(seg, "duration", "auto")));
+  shared.append(field("Duration (seconds)", numberFor(seg, "duration", "auto"),
+    "How long on screen. Leave blank/0 for 'auto' to share the target duration."));
   body.append(shared);
-  body.append(field("On-screen caption (optional)", inputFor(seg, "caption", "short keyword or hook…")));
+  body.append(field("On-screen caption (optional)", inputFor(seg, "caption", "short keyword or hook…"),
+    "Big burned-in text — great for sound-off viewing. Keep it to a few words."));
 
   return el("div", { class: "seg-card" }, head, body);
 }
@@ -260,18 +284,40 @@ function ucCard(key, uc) {
 function basicsPanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "1"),
-    el("h2", {}, "Project"), el("span", { class: "phead sub" })));
+    el("h2", {}, "Project"), el("span", { class: "phead sub" }, "the basics of your video")));
   p.append(field("Title", el("input", { type: "text", value: state.title, placeholder: "My UGC ad — product X",
-    oninput: (e) => { state.title = e.target.value; syncGenerateEnabled(); } })));
+    oninput: (e) => { state.title = e.target.value; syncGenerateEnabled(); } }),
+    "Names the project in your Library and the output file. Required."));
+  p.append(field("Format (aspect ratio)", segChips(state.caps ? state.caps.formats : ["9:16", "1:1", "16:9"], state.format, (v) => { state.format = v; renderBuilder(); })));
+  p.append(legend([
+    ["9:16", "vertical — TikTok, Reels, Stories, Shorts (best for phones)."],
+    ["1:1", "square — Instagram/Facebook feed posts."],
+    ["16:9", "landscape — YouTube, websites, presentations."],
+    ["4:5", "portrait — Instagram feed (takes more screen than 1:1)."],
+  ]));
+
+  // live duration hint
+  const autoCount = state.segments.filter(s => !(parseFloat(s.duration) > 0)).length;
+  const explicit = state.segments.reduce((a, s) => a + (parseFloat(s.duration) > 0 ? parseFloat(s.duration) : 0), 0);
+  const perAuto = autoCount ? Math.max(1.5, (state.duration - explicit) / autoCount) : 0;
+  const durHint = autoCount
+    ? `Total length of the final video. It's split across your segments: the ${autoCount} segment(s) set to "auto" get ≈ ${perAuto.toFixed(1)}s each. Pin a segment by typing a number in its Duration field.`
+    : `Total length. Every segment has a fixed Duration, so the video will be ${explicit.toFixed(0)}s regardless of this value.`;
+
   p.append(el("div", { class: "row" },
-    field("Format", segChips(state.caps ? state.caps.formats : ["9:16", "1:1", "16:9"], state.format, (v) => { state.format = v; renderBuilder(); })),
+    field("Target duration (seconds)", el("input", { type: "number", min: "3", max: "600", value: state.duration,
+      oninput: (e) => { state.duration = parseInt(e.target.value) || 30; renderBuilder(); } }), durHint),
+    field("Render engine", select(RUNTIMES.map(r => ({ value: r, label: runtimeLabel(r) })), state.runtime, (v) => { state.runtime = v; }),
+      "How the video is assembled. Leave on Auto unless you know you need a specific engine."),
+    field("Default motion", select(MOTIONS, state.motion, (v) => { state.motion = v; }),
+      "Motion applied to image segments that don't set their own. Video/avatar clips ignore it."),
   ));
-  p.append(el("div", { class: "row" },
-    field("Target duration (s) — up to 120+ for UGC", el("input", { type: "number", min: "3", max: "600", value: state.duration,
-      oninput: (e) => { state.duration = parseInt(e.target.value) || 30; } })),
-    field("Render runtime", select(RUNTIMES.map(r => ({ value: r, label: runtimeLabel(r) })), state.runtime, (v) => { state.runtime = v; })),
-    field("Default motion", select(MOTIONS, state.motion, (v) => { state.motion = v; })),
-  ));
+  p.append(legend([
+    ["Auto", "picks the best engine (usually Remotion). Recommended."],
+    ["Remotion", "React motion graphics — smooth animated images, captions, charts."],
+    ["HyperFrames", "HTML/CSS/GSAP — kinetic typography, web-style promos."],
+    ["FFmpeg", "plain cuts/concat — fastest, least animated."],
+  ]));
   return p;
 }
 function runtimeLabel(r) {
@@ -285,7 +331,8 @@ function runtimeLabel(r) {
 function mediaPanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "2"),
-    el("h2", {}, "Media"), el("span", { class: "phead sub" }, "drop images · video · audio")));
+    el("h2", {}, "Media"), el("span", { class: "phead sub" }, "your assets")));
+  p.append(note("Upload once here, then use these files anywhere below — as timeline segments, a voiceover, a music track, or a product reference. Images, video clips, and audio are all accepted."));
   const dz = el("div", { class: "dropzone", tabindex: "0" },
     el("div", { class: "big" }, "⇪  DROP FILES HERE"),
     el("div", { class: "small" }, "images, video clips, voiceover & music — or click to browse"));
@@ -324,7 +371,14 @@ async function handleFiles(files) {
 function timelinePanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "3"),
-    el("h2", {}, "Timeline"), el("span", { class: "phead sub" }, "build a real edit, not a slideshow")));
+    el("h2", {}, "Timeline"), el("span", { class: "phead sub" }, "the shots, in order")));
+  p.append(note("Each segment is one shot, played top-to-bottom. Add as many as you like and reorder with ↑ ↓. Mix types freely — that's what makes it feel like a real edit, not a slideshow."));
+  p.append(legend([
+    ["Media", "a file you uploaded."],
+    ["AI Image", "a still generated from a prompt."],
+    ["AI Video", "a motion clip generated from a prompt."],
+    ["Avatar / UGC", "a creator speaking your script."],
+  ]));
   const add = el("div", { class: "add-seg" },
     el("button", { class: "pill-btn", onclick: () => addSegment("media") }, "＋ Media"),
     el("button", { class: "pill-btn", onclick: () => addSegment("ai_image") }, "＋ AI Image"),
@@ -342,18 +396,26 @@ function timelinePanel() {
 function voiceoverPanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "4"),
-    el("h2", {}, "Voiceover")));
+    el("h2", {}, "Voiceover"), el("span", { class: "phead sub" }, "the spoken track over your video")));
   p.append(field("Source", segChips(["none", "upload", "tts"].map(labelSource), sourceLabel(state.voiceover.source, "vo"),
     (v) => { state.voiceover.source = unlabelSource(v); renderBuilder(); })));
+  p.append(legend([
+    ["none", "no narration — visuals + music only."],
+    ["upload", "use an audio file you recorded/uploaded."],
+    ["script → tts", "type text; we generate a natural voice (Google now, ElevenLabs when you add the key)."],
+  ]));
   if (state.voiceover.source === "upload") {
     p.append(field("Audio file", select(mediaOptions(["audio"]), state.voiceover.file, (v) => { state.voiceover.file = v; })));
   } else if (state.voiceover.source === "tts") {
-    p.append(field("Script", textareaFor(state.voiceover, "script", "Write exactly what the voice should say…")));
+    p.append(field("Script", textareaFor(state.voiceover, "script", "Write exactly what the voice should say…"),
+      "This text becomes the spoken voiceover for the whole video, timed across all your segments."));
     const ttsProvs = ttsProviderOptions();
     p.append(el("div", { class: "row" },
-      field("Voice", ttsProvs.length ? select(ttsProvs, state.voiceover.provider, (v) => { state.voiceover.provider = v; })
-        : el("span", { class: "setup-note" }, "No TTS key yet — add ELEVENLABS_API_KEY (or use Google TTS).")),
-      field("Voice id (optional)", inputFor(state.voiceover, "voice_id", "e.g. Rachel / a HeyGen voice")),
+      field("Voice engine", ttsProvs.length ? select(ttsProvs, state.voiceover.provider, (v) => { state.voiceover.provider = v; })
+        : el("span", { class: "setup-note" }, "No TTS key yet — add ELEVENLABS_API_KEY (or use Google TTS)."),
+        "Which text-to-speech provider generates the voice."),
+      field("Voice id (optional)", inputFor(state.voiceover, "voice_id", "e.g. Rachel"),
+        "A specific voice for that engine. Leave blank for a good default."),
     ));
   }
   return p;
@@ -366,21 +428,31 @@ function ttsProviderOptions() {
 function musicPanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "5"),
-    el("h2", {}, "Music")));
+    el("h2", {}, "Music"), el("span", { class: "phead sub" }, "background track under everything")));
   p.append(field("Source", segChips(["none", "upload", "library", "generate"], state.music.source,
     (v) => { state.music.source = v; renderBuilder(); })));
+  p.append(legend([
+    ["none", "no music."],
+    ["upload", "use an audio file you uploaded."],
+    ["library", "pick a track from your music_library/ folder."],
+    ["generate", "create an AI track from a prompt (needs a music provider)."],
+  ]));
   if (state.music.source === "upload") {
-    p.append(field("Audio file", select(mediaOptions(["audio"]), state.music.file, (v) => { state.music.file = v; })));
+    p.append(field("Audio file", select(mediaOptions(["audio"]), state.music.file, (v) => { state.music.file = v; }),
+      "An uploaded audio file to use as the background track."));
   } else if (state.music.source === "library") {
     const lib = (state.caps && state.caps.music_library) || [];
     p.append(field("Library track", lib.length ? select([{ value: "", label: "— choose —" }, ...lib], state.music.track, (v) => { state.music.track = v; })
-      : el("span", { class: "setup-note" }, "music_library/ is empty — drop .mp3 files there.")));
+      : el("span", { class: "setup-note" }, "music_library/ is empty — drop .mp3 files there."),
+      "Royalty-free tracks you placed in the music_library/ folder."));
   } else if (state.music.source === "generate") {
-    p.append(field("Music prompt", inputFor(state.music, "prompt", "soft upbeat modern, no vocals")));
+    p.append(field("Music prompt", inputFor(state.music, "prompt", "soft upbeat modern, no vocals"),
+      "Describe the mood/genre/tempo. Keep it instrumental ('no vocals') so it doesn't fight the voiceover."));
   }
   if (state.music.source !== "none") {
     p.append(field("Music volume (0–1)", el("input", { type: "number", min: "0", max: "1", step: "0.02", value: state.music.volume,
-      oninput: (e) => { state.music.volume = parseFloat(e.target.value); } })));
+      oninput: (e) => { state.music.volume = parseFloat(e.target.value); } }),
+      "0 = silent, 1 = full. Around 0.1–0.15 keeps music under a voiceover; go higher (0.3+) if there's no voice."));
   }
   return p;
 }
@@ -388,12 +460,13 @@ function musicPanel() {
 function extrasPanel() {
   const p = el("div", { class: "panel" });
   p.append(el("div", { class: "phead" }, el("span", { class: "num" }, "6"),
-    el("h2", {}, "Captions & Product")));
+    el("h2", {}, "Captions & Product"), el("span", { class: "phead sub" }, "text + product placement")));
   p.append(field("Captions", segChips(["on", "off"], state.captions.enabled ? "on" : "off",
-    (v) => { state.captions.enabled = v === "on"; })));
+    (v) => { state.captions.enabled = v === "on"; }),
+    "When ON, each segment's caption text is burned onto the video. Essential for sound-off social viewing. (Latin text renders everywhere; Arabic needs a shaping font installed.)"));
   p.append(field("Product placement assets", multiPick(state.products,
     mediaOptions(["image", "video"]).slice(1), (arr) => { state.products = arr; }),
-    "Attach product images used as references for AI shots / UGC."));
+    "Select uploaded product images. They're used as the reference/first-frame for AI Video & Avatar segments that don't set their own — so your real product shows up in generated shots."));
   return p;
 }
 function multiPick(current, options, onChange) {
@@ -423,9 +496,11 @@ function generatePanel() {
     onclick: onGenerate }, "◉  Generate Video");
   const prog = el("div", { class: "progress", id: "prog" },
     el("div", { class: "bar" }, el("i", { id: "progBar" })),
-    el("div", { class: "msg", id: "progMsg" }, ""));
+    el("div", { class: "msg", id: "progMsg" }, ""),
+    el("div", { class: "warns", id: "progWarns" }));
   const res = el("div", { class: "result", id: "result" });
-  p.append(btn, prog, res);
+  p.append(note("Generating runs the real providers for each AI/avatar segment, then composes everything. It can take a few minutes and appears live on the board. Segments with no file/prompt are skipped (you'll be warned)."),
+    btn, prog, res);
   return p;
 }
 function syncGenerateEnabled() {
@@ -455,8 +530,10 @@ async function onGenerate() {
   const prog = document.getElementById("prog");
   const bar = document.getElementById("progBar");
   const msg = document.getElementById("progMsg");
+  const warns = document.getElementById("progWarns");
   const result = document.getElementById("result");
   result.className = "result"; result.innerHTML = "";
+  if (warns) warns.innerHTML = "";
   prog.className = "progress show";
   msg.className = "msg"; msg.textContent = "Submitting…"; bar.style.width = "3%";
   try {
@@ -467,7 +544,7 @@ async function onGenerate() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || "generate failed");
     state.job = data.job_id;
-    pollJob(data.job_id, data.project_id, { bar, msg, result, btn });
+    pollJob(data.job_id, data.project_id, { bar, msg, warns, result, btn });
   } catch (e) {
     msg.className = "msg err"; msg.textContent = "✕ " + e.message;
     btn.disabled = false;
@@ -482,6 +559,11 @@ function pollJob(jobId, projectId, ui) {
     ui.bar.style.width = `${j.progress || 0}%`;
     ui.msg.className = "msg";
     ui.msg.textContent = `${j.message || j.status}${j.progress ? " · " + j.progress + "%" : ""}`;
+    if (ui.warns) {
+      const w = (j.log || []).filter((l) => l.startsWith("⚠"));
+      ui.warns.innerHTML = "";
+      for (const line of w) ui.warns.append(el("div", { class: "warn-line" }, line));
+    }
     if (j.status === "done") {
       ui.msg.className = "msg ok"; ui.msg.textContent = "✓ Done";
       ui.result.className = "result show";

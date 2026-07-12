@@ -11,6 +11,19 @@ assets, and hit **Generate**.
 > segment, then composes everything into one finished video that lands in your
 > Library.
 
+### ⏱️ How duration works (important)
+
+The **Target duration** is the *total* length. It is **split across your
+segments**: every segment left on **"auto"** gets an equal share, and any segment
+where you type a specific **Duration** keeps exactly that. So 4 auto segments at a
+30s target = ~7.5s each.
+
+**Empty segments are skipped** — a *Media* segment with no file chosen, or an AI
+segment with no prompt, is dropped (you'll get a warning). The remaining segments
+then split the full target between them, so the final video still matches your
+target. If your video came out shorter than expected, it's almost always because
+some segments were empty and skipped — fill them in or remove them.
+
 ---
 
 ## 🔑 API keys — the fast track

@@ -339,16 +339,65 @@ def _run_job(job_id: str, spec: dict) -> None:
             got = _extract_path(r.data, AUDIO_EXT) or str(out)
             music_src = publish_asset(Path(got), "bg.mp3")
 
+        # ---- Khedma-Flow realistic mode (Veo) ----------------------------
+        if (spec.get("mode") or "").lower() == "khedma_real":
+            imgs = []
+            for idx, seg in enumerate(spec.get("segments") or []):
+                if seg.get("type") != "media":
+                    continue
+                up = resolve_upload(seg.get("file"))
+                if up and kind_of(up.name) == "image":
+                    imgs.append(up)
+                elif seg.get("file"):
+                    _update(job_id, log_line=f"⚠ Segment #{idx+1} skipped — needs an image.")
+            if not imgs:
+                raise RuntimeError("Add your app screenshots (image segments) — Khedma mode animates real screens.")
+
+            vo = spec.get("voiceover") or {}
+            voice_local = resolve_upload(vo.get("file")) if vo.get("source") == "upload" and vo.get("file") else None
+            target = float(spec.get("duration") or 0)
+            if target <= 0:
+                target = _probe_duration(voice_local) if voice_local else 16.0
+
+            veo_dir = proj_dir / "assets" / "veo"
+            veo_dir.mkdir(parents=True, exist_ok=True)
+            add_avatar = bool(spec.get("avatar"))
+            n_units = len(imgs) + (1 if add_avatar else 0)
+            per = max(2.5, round(target / n_units, 2))
+            clips: list = []
+            crops: list = []
+            if add_avatar:
+                _update(job_id, progress=18, message="Generating presenter hook…")
+                ap = veo_dir / "avatar.mp4"
+                _veo_text_clip(str(ap))
+                clips.append((ap, per)); crops.append(0.94)
+            for i, up in enumerate(imgs):
+                _update(job_id, progress=25 + int(60 * i / max(1, len(imgs))),
+                        message=f"Generating shot {i+1}/{len(imgs)} (Veo, ~1-2 min each)…")
+                cp = veo_dir / f"clip_{i}.mp4"
+                _veo_image_clip(str(up), str(cp))
+                clips.append((cp, per)); crops.append(0.86)
+
+            _update(job_id, progress=90, message="Editing final reel…")
+            out_path = proj_dir / "renders" / "final.mp4"
+            _stitch_veo(clips, voice_local, out_path, crops=crops)
+            (proj_dir / "artifacts").mkdir(exist_ok=True)
+            (proj_dir / "artifacts" / "render_report.json").write_text(json.dumps({
+                "output_path": f"projects/{project_id}/renders/final.mp4",
+                "runtime": "veo+ffmpeg", "resolution": "1080x1920",
+                "shots": len(clips), "avatar": add_avatar, "captions": False,
+            }, indent=2))
+            _update(job_id, status="done", progress=100, message="Done",
+                    output_url=f"/media/{project_id}/renders/final.mp4",
+                    log_line=f"khedma reel OK → {out_path}")
+            return
+
         # ---- 3. Segments → visual cuts -----------------------------------
         segments = spec.get("segments") or []
         if not segments:
             raise RuntimeError("Add at least one segment (media, AI image/video, or avatar).")
 
-        cuts: list[dict] = []
-        captions: list[dict] = []
         default_motion = spec.get("motion") or "ken-burns"
-        t_cursor = 0.0
-        n_seg = len(segments)
         product_ref = None
         products = spec.get("products") or []
         if products:
@@ -356,22 +405,66 @@ def _run_job(job_id: str, spec: dict) -> None:
             if up:
                 product_ref = up  # local path used as reference image
 
+        # 3a. Pre-flight: keep only segments that will actually render.
+        #     Media with no file, or AI/avatar with no prompt/script, are skipped
+        #     with a visible warning (never silently dropped).
+        plan: list[dict] = []
         for idx, seg in enumerate(segments):
-            seg_prog = 25 + int(60 * idx / max(1, n_seg))
             stype = seg.get("type")
-            dur = float(seg.get("duration") or 0) or _auto_seg_dur(spec, n_seg)
+            if stype == "media":
+                up = resolve_upload(seg.get("file"))
+                if not up:
+                    _update(job_id, log_line=f"⚠ Segment #{idx+1} (media) skipped — no file selected.")
+                    continue
+                plan.append({"idx": idx, "seg": seg, "up": up})
+            elif stype in ("ai_image", "ai_video"):
+                if not (seg.get("prompt") or "").strip():
+                    _update(job_id, log_line=f"⚠ Segment #{idx+1} ({stype}) skipped — empty prompt.")
+                    continue
+                plan.append({"idx": idx, "seg": seg, "up": None})
+            elif stype == "avatar":
+                if not (seg.get("script") or "").strip():
+                    _update(job_id, log_line=f"⚠ Segment #{idx+1} (avatar) skipped — empty script.")
+                    continue
+                plan.append({"idx": idx, "seg": seg, "up": None})
+
+        if not plan:
+            raise RuntimeError(
+                "No usable segments. Upload & pick a file for Media segments, or add a "
+                "prompt/script to AI/Avatar segments (empty ones are skipped).")
+
+        # 3b. Distribute the target duration across the surviving segments.
+        #     Segments with an explicit Duration keep it; the rest split what's left
+        #     equally — so the final video matches the target you set.
+        target = float(spec.get("duration") or 0)
+        if target <= 0:
+            target = len(plan) * 4.0
+        explicit_sum = sum(float(p["seg"].get("duration") or 0) for p in plan
+                           if float(p["seg"].get("duration") or 0) > 0)
+        auto_items = [p for p in plan if not (float(p["seg"].get("duration") or 0) > 0)]
+        per_auto = max(1.5, (target - explicit_sum) / len(auto_items)) if auto_items else 0.0
+        for p in plan:
+            d = float(p["seg"].get("duration") or 0)
+            p["dur"] = d if d > 0 else per_auto
+
+        # 3c. Generate assets + build the timeline.
+        cuts: list[dict] = []
+        captions: list[dict] = []
+        t_cursor = 0.0
+        n_plan = len(plan)
+        for pos, p in enumerate(plan):
+            idx, seg, up, dur = p["idx"], p["seg"], p["up"], p["dur"]
+            seg_prog = 25 + int(60 * pos / max(1, n_plan))
+            stype = seg.get("type")
             src_rel = None
             is_video = False
 
             if stype == "media":
-                up = resolve_upload(seg.get("file"))
-                if not up:
-                    continue
                 is_video = kind_of(up.name) == "video"
                 src_rel = publish_asset(up, f"seg{idx}{up.suffix.lower()}")
 
             elif stype == "ai_image":
-                _update(job_id, progress=seg_prog, message=f"Generating image {idx+1}/{n_seg}…")
+                _update(job_id, progress=seg_prog, message=f"Generating image {pos+1}/{n_plan}…")
                 itool = _pick_tool(registry, "image_generation", seg.get("provider"))
                 if itool is None:
                     raise RuntimeError("No image provider configured.")
@@ -384,14 +477,14 @@ def _run_job(job_id: str, spec: dict) -> None:
                 src_rel = publish_asset(Path(got), f"seg{idx}.png")
 
             elif stype == "ai_video":
-                _update(job_id, progress=seg_prog, message=f"Generating video clip {idx+1}/{n_seg}…")
+                _update(job_id, progress=seg_prog, message=f"Generating video clip {pos+1}/{n_plan}…")
                 vtool = _pick_tool(registry, "video_generation", seg.get("provider"), exclude={"video_selector"}) \
                     or registry._tools.get("video_selector")
                 if vtool is None:
                     raise RuntimeError("No video provider configured.")
                 out = assets_dir / "video" / f"seg{idx}.mp4"
                 params = {"prompt": seg["prompt"], "aspect_ratio": aspect,
-                          "duration": int(dur), "output_path": str(out)}
+                          "duration": int(round(dur)), "output_path": str(out)}
                 ref = resolve_upload(seg.get("image")) or product_ref
                 if ref:
                     params["reference_image_path"] = str(ref)
@@ -403,7 +496,7 @@ def _run_job(job_id: str, spec: dict) -> None:
                 is_video = True
 
             elif stype == "avatar":
-                _update(job_id, progress=seg_prog, message=f"Generating UGC avatar {idx+1}/{n_seg}…")
+                _update(job_id, progress=seg_prog, message=f"Generating UGC avatar {pos+1}/{n_plan}…")
                 atool = _pick_avatar_tool(registry)
                 if atool is None:
                     raise RuntimeError(
@@ -427,16 +520,12 @@ def _run_job(job_id: str, spec: dict) -> None:
                 src_rel = publish_asset(Path(got), f"seg{idx}.mp4")
                 is_video = True
 
-            else:
-                continue
-
             cut = {"source": src_rel, "in_seconds": round(t_cursor, 2),
                    "out_seconds": round(t_cursor + dur, 2)}
             if not is_video:
                 cut["animation"] = seg.get("motion") or default_motion
             cuts.append(cut)
 
-            # captions for this segment
             cap_text = (seg.get("caption") or "").strip()
             if cap_text and (spec.get("captions") or {}).get("enabled", True):
                 captions.extend(_words_for(cap_text, t_cursor, t_cursor + dur))
@@ -444,6 +533,7 @@ def _run_job(job_id: str, spec: dict) -> None:
 
         if not cuts:
             raise RuntimeError("No usable segments produced a visual.")
+        _update(job_id, log_line=f"timeline: {len(cuts)} segments · {round(t_cursor,1)}s total")
 
         # ---- 4. Build composition ---------------------------------------
         audio: dict = {}
@@ -498,11 +588,108 @@ def _run_job(job_id: str, spec: dict) -> None:
         traceback.print_exc()
 
 
-def _auto_seg_dur(spec: dict, n_seg: int) -> float:
-    total = float(spec.get("duration") or 0)
-    if total > 0 and n_seg > 0:
-        return max(1.5, total / n_seg)
-    return 3.5
+PUBLIC_ROOT = REPO_ROOT / "remotion-composer" / "public"
+
+
+def _probe_duration(path) -> float:
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", str(path)],
+            capture_output=True, text=True, timeout=30)
+        return float(json.loads(r.stdout)["format"]["duration"])
+    except Exception:
+        return 0.0
+
+
+def _render_composition(comp_id: str, props: dict, out_path: Path, timeout_ms: int = 180000) -> None:
+    """Render a named Remotion composition (e.g. AppReel) to out_path."""
+    import subprocess
+    composer = REPO_ROOT / "remotion-composer"
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    props_path = out_path.parent / f".{comp_id}_props.json"
+    props_path.write_text(json.dumps(props))
+    cmd = ["npx", "remotion", "render", str(composer / "src" / "index.tsx"),
+           comp_id, str(out_path.resolve()), f"--props={props_path.resolve()}",
+           f"--timeout={timeout_ms}"]
+    r = subprocess.run(cmd, cwd=composer, capture_output=True, text=True,
+                       timeout=timeout_ms // 1000 + 180)
+    try:
+        props_path.unlink()
+    except Exception:
+        pass
+    if r.returncode != 0 or not out_path.exists():
+        tail = "\n".join((r.stderr or r.stdout or "").splitlines()[-15:])
+        raise RuntimeError(f"{comp_id} render failed: {tail}")
+
+
+# --------------------------------------------------------------------------
+# Khedma-Flow realistic mode: real app screens → Veo POV clips → stitched reel
+# --------------------------------------------------------------------------
+
+POV_PROMPT = (
+    "POV over-the-shoulder shot, vertical 9:16: a young person sits on a cozy sofa in a bright living "
+    "room with soft natural window light and a blurred green plant behind. They hold this smartphone in "
+    "both hands and their right index finger scrolls and taps this app screen; the interface responds "
+    "smoothly. Realistic skin and hands, cinematic shallow depth of field, subtle handheld motion, screen "
+    "glare. No captions. No scene cuts. No dialogue. No text overlays.")
+AVATAR_PROMPT = (
+    "Vertical 9:16 close-up: a friendly young person in a smart casual shirt in a bright modern office "
+    "with soft bokeh, looking at the camera and talking energetically, raising an open hand in a warm "
+    "'wait, listen' gesture, natural enthusiastic gestures, cinematic shallow depth of field, realistic. "
+    "No on-screen text. No captions.")
+
+
+def _veo_image_clip(screen_path: str, out_path: str, prompt: str = POV_PROMPT) -> None:
+    from tools.tool_registry import registry
+    t = registry._tools.get("veo_video")
+    if t is None:
+        raise RuntimeError("Veo video tool unavailable. Set GOOGLE_API_KEY / GEMINI_API_KEY.")
+    r = t.execute({"operation": "image_to_video", "prompt": prompt,
+                   "reference_image_path": screen_path, "image_path": screen_path,
+                   "duration": "8s", "aspect_ratio": "9:16", "output_path": out_path})
+    if not r.success:
+        raise RuntimeError(f"Veo clip failed: {r.error}")
+
+
+def _veo_text_clip(out_path: str, prompt: str = AVATAR_PROMPT) -> None:
+    from tools.tool_registry import registry
+    t = registry._tools.get("veo_video")
+    r = t.execute({"operation": "text_to_video", "prompt": prompt,
+                   "duration": "8s", "aspect_ratio": "9:16", "output_path": out_path})
+    if not r.success:
+        raise RuntimeError(f"Veo presenter clip failed: {r.error}")
+
+
+def _stitch_veo(clips: list[tuple], voice_path, out_path: Path, crops: list[float] | None = None) -> None:
+    """Concatenate trimmed Veo clips (each (path, duration)) + optional voice, no subtitles."""
+    import subprocess
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    inputs, filters, labels = [], [], []
+    for i, (path, dur) in enumerate(clips):
+        inputs += ["-i", str(path)]
+        crop = (crops[i] if crops else 0.86)
+        filters.append(
+            f"[{i}:v]trim=start=0.6:duration={dur:.2f},setpts=PTS-STARTPTS,"
+            f"crop=in_w*{crop}:in_h*{crop},scale=1080:1920,fps=30,format=yuv420p[v{i}]")
+        labels.append(f"[v{i}]")
+    concat = "".join(labels) + f"concat=n={len(clips)}:v=1:a=0[v]"
+    fc = ";".join(filters) + ";" + concat
+    cmd = ["ffmpeg", "-y", "-v", "error"] + inputs
+    amap = None
+    if voice_path and Path(voice_path).exists():
+        cmd += ["-i", str(voice_path)]
+        amap = f"{len(clips)}:a"
+    cmd += ["-filter_complex", fc, "-map", "[v]"]
+    if amap:
+        cmd += ["-map", amap]
+    cmd += ["-c:v", "libx264", "-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-shortest", str(out_path)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0 or not out_path.exists():
+        raise RuntimeError("stitch failed: " + "\n".join((r.stderr or "").splitlines()[-8:]))
 
 
 def _words_for(text: str, start: float, end: float) -> list[dict]:

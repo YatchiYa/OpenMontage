@@ -1,5 +1,6 @@
 import { Composition, CalculateMetadataFunction } from "remotion";
 import { Explainer, ExplainerProps } from "./Explainer";
+import { AppReel, AppReelProps } from "./AppReel";
 import {
   CinematicRenderer,
   calculateCinematicMetadata,
@@ -141,9 +142,30 @@ const calculateMetadata: CalculateMetadataFunction<ExplainerProps> = async ({
   return { durationInFrames: Math.ceil((lastEnd + 1) * 30), ...dims };
 };
 
+const calculateAppReelMetadata: CalculateMetadataFunction<AppReelProps> = async ({ props }) => {
+  const segs = props.segments || [];
+  const w = (props as Record<string, unknown>).width;
+  const h = (props as Record<string, unknown>).height;
+  const dims: { width?: number; height?: number } =
+    typeof w === "number" && typeof h === "number" ? { width: Math.round(w), height: Math.round(h) } : {};
+  if (!segs.length) return { durationInFrames: 30 * 26, ...dims };
+  const last = Math.max(...segs.map((s) => s.out_seconds || 0));
+  return { durationInFrames: Math.ceil((last + 0.3) * 30), ...dims };
+};
+
 export const Root: React.FC = () => {
   return (
     <>
+      <Composition
+        id="AppReel"
+        component={AppReel}
+        durationInFrames={30 * 26}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{ segments: [] }}
+        calculateMetadata={calculateAppReelMetadata}
+      />
       <Composition
         id="Explainer"
         component={Explainer}

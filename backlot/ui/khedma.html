@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Khedma Flow — Video Generator</title>
+<link rel="stylesheet" href="/ui/board.css">
+<link rel="stylesheet" href="/ui/studio.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="slate">
+    <div class="clapper"></div>
+    <div>
+      <span class="wordmark">Khedma Flow</span>
+      <h1>Video Generator</h1>
+    </div>
+    <span class="chip" id="modeChip">realistic UGC</span>
+    <div class="spacer"></div>
+    <a class="nav-link" href="/">◂ Library</a>
+    <span class="live idle" id="liveBadge"><span class="dot"></span><span id="liveText">READY</span></span>
+  </header>
+
+  <div class="studio-grid">
+    <div class="builder" id="builder"></div>
+    <div class="caps-rail">
+      <div class="panel">
+        <div class="phead"><span class="num">i</span><h2>How it works</h2></div>
+        <div id="howto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="module" src="/ui/khedma.js"></script>
+</body>
+</html>

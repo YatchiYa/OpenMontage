@@ -315,6 +315,10 @@ def create_app() -> FastAPI:
     async def studio_page() -> HTMLResponse:
         return _ui_html("studio.html", ("board.css", "studio.css", "studio.js"))
 
+    @app.get("/khedma")
+    async def khedma_page() -> HTMLResponse:
+        return _ui_html("khedma.html", ("board.css", "studio.css", "khedma.js"))
+
     # Friendly use-case entry points → Studio preloaded with a recipe.
     @app.get("/ugc")
     async def uc_ugc() -> RedirectResponse:

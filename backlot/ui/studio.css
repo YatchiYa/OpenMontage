@@ -69,6 +69,18 @@ select {
 .row { display: flex; gap: 12px; flex-wrap: wrap; }
 .row > * { flex: 1; min-width: 120px; }
 
+/* explanatory help text */
+.help { display: block; margin-top: 5px; font-size: calc(10.5px * var(--fs-scale)); color: var(--text-3); line-height: 1.45; }
+.panel-note { font-size: calc(11.5px * var(--fs-scale)); color: var(--text-2); line-height: 1.5; margin-bottom: 14px; }
+.legend { display: flex; flex-direction: column; gap: 4px; margin: -4px 0 14px; padding: 10px 12px;
+  background: var(--surface-2); border: 1px solid var(--border-soft); border-radius: 9px; }
+.legend .leg { font-size: calc(10.5px * var(--fs-scale)); color: var(--text-3); line-height: 1.4; }
+.legend .leg b { color: var(--text-2); font-family: var(--mono); font-size: calc(10px * var(--fs-scale)); margin-right: 4px; }
+.seg-desc { font-size: calc(11px * var(--fs-scale)); color: var(--text-2); line-height: 1.45; margin-bottom: 12px;
+  padding-bottom: 10px; border-bottom: 1px dashed var(--border-soft); }
+.warns { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.warn-line { font-family: var(--mono); font-size: calc(10.5px * var(--fs-scale)); color: var(--amber); }
+
 /* segmented chip toggles */
 .seg {
   display: inline-flex; gap: 6px; flex-wrap: wrap;
